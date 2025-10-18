@@ -37,7 +37,7 @@ func (sDB *SecuredDB) connect() error {
 func (sDB *SecuredDB) Get(id string) (core.Secured, error) {
 	var secured core.Secured
 	err := sDB.db.Get(&secured, `
-		SELECT id, title FROM secured WHERE id == ?
+		SELECT id, title, group_id FROM secured WHERE id = ?
 	`, id)
 	if err != nil {
 		return secured, err
@@ -48,8 +48,8 @@ func (sDB *SecuredDB) Get(id string) (core.Secured, error) {
 
 func (sDB *SecuredDB) AddSecured(secured core.Secured) (core.Secured, error) {
 	result, err := sDB.db.NamedExec(`
-		INSERT INTO Secured (title)
-		VALUES (:title);
+		INSERT INTO Secured (title, group_id)
+		VALUES (:title, :group_id);
 	`, &secured)
 	if err != nil {
 		return core.Secured{}, err
@@ -72,8 +72,9 @@ func (sDB *SecuredDB) UpdateSecuredTitle(secured core.Secured) (core.Secured, er
 	_, err := sDB.db.NamedExec(`
 		UPDATE Secured
 		SET
-			title = :title
-		WHERE 
+			title = :title,
+			group_id = :group_id
+		WHERE
 			id = :id
 	`, secured)
 	if err != nil {
@@ -90,7 +91,7 @@ func (sDB *SecuredDB) UpdateSecuredTitle(secured core.Secured) (core.Secured, er
 
 func (sDB *SecuredDB) DeleteSecured(id string) error {
 	_, err := sDB.db.Exec(`
-		DELETE FROM Secured WHERE id == ?
+		DELETE FROM Secured WHERE id = ?
 	`, id)
 	if err != nil {
 		return err
@@ -102,7 +103,31 @@ func (sDB *SecuredDB) DeleteSecured(id string) error {
 func (sDB *SecuredDB) GetAllSecureds() ([]core.Secured, error) {
 	var secureds []core.Secured
 	err := sDB.db.Select(&secureds, `
-		SELECT id, title FROM secured
+		SELECT id, title, group_id FROM secured
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	return secureds, nil
+}
+
+func (sDB *SecuredDB) GetSecuredsByGroup(groupID string) ([]core.Secured, error) {
+	var secureds []core.Secured
+	err := sDB.db.Select(&secureds, `
+		SELECT id, title, group_id FROM secured WHERE group_id = ?
+	`, groupID)
+	if err != nil {
+		return nil, err
+	}
+
+	return secureds, nil
+}
+
+func (sDB *SecuredDB) GetUngroupedSecureds() ([]core.Secured, error) {
+	var secureds []core.Secured
+	err := sDB.db.Select(&secureds, `
+		SELECT id, title, group_id FROM secured WHERE group_id IS NULL
 	`)
 	if err != nil {
 		return nil, err

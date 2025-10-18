@@ -11,6 +11,7 @@ import (
 func main() {
 	config := configurator.NewConfig().
 		AddPassword().
+		AddGroup().
 		AddSecured().
 		Start()
 

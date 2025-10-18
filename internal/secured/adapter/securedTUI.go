@@ -87,7 +87,9 @@ type SecuredTUI struct {
 	err            error
 	secureds       []core.Secured
 	selectedID     string
-	parentMenu     tea.Model
+	groupID        *string
+	groupName      string
+	parentTUI      tea.Model
 	fieldsTUI      *FieldsTUI
 }
 
@@ -119,7 +121,16 @@ func NewSecuredTUI(
 }
 
 func (m *SecuredTUI) SetParentMenu(menu tea.Model) {
-	m.parentMenu = menu
+	m.parentTUI = menu
+}
+
+func (m *SecuredTUI) SetParentTUI(parent tea.Model) {
+	m.parentTUI = parent
+}
+
+func (m *SecuredTUI) SetGroup(groupID *string, groupName string) {
+	m.groupID = groupID
+	m.groupName = groupName
 }
 
 func (m *SecuredTUI) SetWindowSize(width, height int) {
@@ -138,11 +149,11 @@ func (m *SecuredTUI) SetWindowSize(width, height int) {
 }
 
 func (m *SecuredTUI) returnToParent() tea.Model {
-	if m.parentMenu == nil {
+	if m.parentTUI == nil {
 		return m
 	}
 
-	if sizer, ok := m.parentMenu.(interface {
+	if sizer, ok := m.parentTUI.(interface {
 		Update(tea.Msg) (tea.Model, tea.Cmd)
 	}); ok {
 		updated, _ := sizer.Update(tea.WindowSizeMsg{
@@ -152,12 +163,20 @@ func (m *SecuredTUI) returnToParent() tea.Model {
 		return updated
 	}
 
-	return m.parentMenu
+	return m.parentTUI
 }
 
 func (m *SecuredTUI) loadSecureds() tea.Cmd {
 	return func() tea.Msg {
-		secureds, err := m.SecuredService.GetAllSecureds()
+		var secureds []core.Secured
+		var err error
+
+		if m.groupID == nil {
+			secureds, err = m.SecuredService.GetUngroupedSecureds()
+		} else {
+			secureds, err = m.SecuredService.GetSecuredsByGroup(*m.groupID)
+		}
+
 		if err != nil {
 			return securedsLoadedMsg{err: err}
 		}
@@ -209,7 +228,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case securedListView:
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q", "ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
@@ -262,7 +281,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				_, err := m.SecuredService.AddSecured(title)
+				_, err := m.SecuredService.AddSecured(title, m.groupID)
 				if err != nil {
 					m.err = err
 					return m, nil
@@ -274,7 +293,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.titleInput.Blur()
 				return m, m.loadSecureds()
 			case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
@@ -302,7 +321,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedID = ""
 				return m, nil
 			case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
@@ -316,7 +335,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = nil
 				return m, nil
 			case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
@@ -361,7 +380,11 @@ func (m SecuredTUI) View() string {
 
 	switch m.state {
 	case securedListView:
-		header := headerStyle.Render("Secured Items")
+		headerText := "Secured Items"
+		if m.groupName != "" {
+			headerText = fmt.Sprintf("Secured Items: %s", m.groupName)
+		}
+		header := headerStyle.Render(headerText)
 		content := header + "\n" + m.list.View()
 
 		if m.err != nil {
