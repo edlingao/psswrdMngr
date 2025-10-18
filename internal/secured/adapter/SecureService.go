@@ -20,8 +20,8 @@ func NewSecureService(
 	}
 }
 
-func (svc *SecureService) AddSecured(title string) (core.Secured, error) {
-	secured := core.NewSecured(title)
+func (svc *SecureService) AddSecured(title string, groupID *string) (core.Secured, error) {
+	secured := core.NewSecured(title, groupID)
 	return svc.SecureDB.AddSecured(*secured)
 }
 
@@ -41,6 +41,14 @@ func (svc *SecureService) DeleteSecured(securedID string) error {
 
 func (svc *SecureService) GetAllSecureds() ([]core.Secured, error) {
 	return svc.SecureDB.GetAllSecureds()
+}
+
+func (svc *SecureService) GetSecuredsByGroup(groupID string) ([]core.Secured, error) {
+	return svc.SecureDB.GetSecuredsByGroup(groupID)
+}
+
+func (svc *SecureService) GetUngroupedSecureds() ([]core.Secured, error) {
+	return svc.SecureDB.GetUngroupedSecureds()
 }
 
 func (svc *SecureService) AddFieldToSecured(securedID, fieldName, fieldValue string) (core.Field, error) {

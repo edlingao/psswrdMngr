@@ -10,6 +10,8 @@ type SecuredDBOperations interface {
 	UpdateSecuredTitle(secured core.Secured) (core.Secured, error)
 	DeleteSecured(securedID string) error
 	GetAllSecureds() ([]core.Secured, error)
+	GetSecuredsByGroup(groupID string) ([]core.Secured, error)
+	GetUngroupedSecureds() ([]core.Secured, error)
 	Get(id string) (core.Secured, error)
 }
 
@@ -20,9 +22,11 @@ type SecuredTUI interface {
 }
 
 type SecuredServiceOperations interface {
-	AddSecured(title string) (core.Secured, error)
+	AddSecured(title string, groupID *string) (core.Secured, error)
 	UpdateSecuredTitle(securedID, newTitle string) (core.Secured, error)
 	DeleteSecured(securedID string) error
 	GetAllSecureds() ([]core.Secured, error)
+	GetSecuredsByGroup(groupID string) ([]core.Secured, error)
+	GetUngroupedSecureds() ([]core.Secured, error)
 	AddFieldToSecured(securedID, fieldName, fieldValue string) (core.Field, error)
 }

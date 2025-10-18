@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/edlingao/psswrdMngr/internal/secured/core"
 	"github.com/edlingao/psswrdMngr/internal/secured/ports"
+	"github.com/sahilm/fuzzy"
 )
 
 type securedViewState int
@@ -80,14 +81,20 @@ type SecuredTUI struct {
 	FieldsService  ports.FieldServiceOperations
 	list           list.Model
 	titleInput     textinput.Model
+	searchInput    textinput.Model
 	state          securedViewState
 	width          int
 	height         int
 	message        string
 	err            error
 	secureds       []core.Secured
+	allSecureds    []core.Secured
 	selectedID     string
-	parentMenu     tea.Model
+	groupID        *string
+	groupName      string
+	searchActive   bool
+	searchFocused  bool
+	parentTUI      tea.Model
 	fieldsTUI      *FieldsTUI
 }
 
@@ -107,11 +114,16 @@ func NewSecuredTUI(
 	titleInput.Placeholder = "Enter secured item title"
 	titleInput.CharLimit = 256
 
+	searchInput := textinput.New()
+	searchInput.Placeholder = "Search secureds..."
+	searchInput.CharLimit = 256
+
 	return &SecuredTUI{
 		SecuredService: securedService,
 		FieldsService:  fieldsService,
 		list:           l,
 		titleInput:     titleInput,
+		searchInput:    searchInput,
 		state:          securedListView,
 		width:          defaultWidth,
 		height:         listHeight,
@@ -119,7 +131,16 @@ func NewSecuredTUI(
 }
 
 func (m *SecuredTUI) SetParentMenu(menu tea.Model) {
-	m.parentMenu = menu
+	m.parentTUI = menu
+}
+
+func (m *SecuredTUI) SetParentTUI(parent tea.Model) {
+	m.parentTUI = parent
+}
+
+func (m *SecuredTUI) SetGroup(groupID *string, groupName string) {
+	m.groupID = groupID
+	m.groupName = groupName
 }
 
 func (m *SecuredTUI) SetWindowSize(width, height int) {
@@ -135,14 +156,15 @@ func (m *SecuredTUI) SetWindowSize(width, height int) {
 	m.list.SetSize(listWidth, listHeight)
 	m.list.SetDelegate(securedItemDelegate{width: listWidth})
 	m.titleInput.Width = listWidth - 4
+	m.searchInput.Width = listWidth - 4
 }
 
 func (m *SecuredTUI) returnToParent() tea.Model {
-	if m.parentMenu == nil {
+	if m.parentTUI == nil {
 		return m
 	}
 
-	if sizer, ok := m.parentMenu.(interface {
+	if sizer, ok := m.parentTUI.(interface {
 		Update(tea.Msg) (tea.Model, tea.Cmd)
 	}); ok {
 		updated, _ := sizer.Update(tea.WindowSizeMsg{
@@ -152,12 +174,20 @@ func (m *SecuredTUI) returnToParent() tea.Model {
 		return updated
 	}
 
-	return m.parentMenu
+	return m.parentTUI
 }
 
 func (m *SecuredTUI) loadSecureds() tea.Cmd {
 	return func() tea.Msg {
-		secureds, err := m.SecuredService.GetAllSecureds()
+		var secureds []core.Secured
+		var err error
+
+		if m.groupID == nil {
+			secureds, err = m.SecuredService.GetUngroupedSecureds()
+		} else {
+			secureds, err = m.SecuredService.GetSecuredsByGroup(*m.groupID)
+		}
+
 		if err != nil {
 			return securedsLoadedMsg{err: err}
 		}
@@ -182,6 +212,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.secureds = msg.secureds
+		m.allSecureds = msg.secureds
 		items := make([]list.Item, len(msg.secureds))
 		for i, s := range msg.secureds {
 			items[i] = securedItem{secured: s}
@@ -202,17 +233,129 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(listWidth, listHeight)
 		m.list.SetDelegate(securedItemDelegate{width: listWidth})
 		m.titleInput.Width = listWidth - 4
+		m.searchInput.Width = listWidth - 4
 		return m, nil
 
 	case tea.KeyMsg:
 		switch m.state {
 		case securedListView:
+			if m.searchActive {
+				if m.searchFocused {
+					switch {
+					case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+						m.searchFocused = false
+						m.searchInput.Blur()
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+						m.searchActive = false
+						m.searchFocused = false
+						m.searchInput.Blur()
+						m.searchInput.SetValue("")
+						items := make([]list.Item, len(m.allSecureds))
+						for i, s := range m.allSecureds {
+							items[i] = securedItem{secured: s}
+						}
+						m.list.SetItems(items)
+						m.secureds = m.allSecureds
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
+						if m.parentTUI != nil {
+							return m.returnToParent(), nil
+						}
+						return m, tea.Quit
+					default:
+						var cmd tea.Cmd
+						m.searchInput, cmd = m.searchInput.Update(msg)
+
+					query := m.searchInput.Value()
+					if query == "" {
+						items := make([]list.Item, len(m.allSecureds))
+						for i, s := range m.allSecureds {
+							items[i] = securedItem{secured: s}
+						}
+						m.list.SetItems(items)
+						m.secureds = m.allSecureds
+					} else {
+						candidates := make([]string, len(m.allSecureds))
+						for i, s := range m.allSecureds {
+							candidates[i] = s.Title
+						}
+
+						matches := fuzzy.Find(query, candidates)
+						items := make([]list.Item, len(matches))
+						filtered := make([]core.Secured, len(matches))
+
+						for i, match := range matches {
+							for _, s := range m.allSecureds {
+								if s.Title == match.Str {
+									items[i] = securedItem{secured: s}
+									filtered[i] = s
+									break
+								}
+							}
+						}
+
+						m.list.SetItems(items)
+						m.secureds = filtered
+					}
+
+					return m, cmd
+					}
+				} else {
+					switch {
+					case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+						m.searchFocused = true
+						m.searchInput.Focus()
+						return m, textinput.Blink
+					case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+						m.searchActive = false
+						m.searchFocused = false
+						m.searchInput.Blur()
+						m.searchInput.SetValue("")
+						items := make([]list.Item, len(m.allSecureds))
+						for i, s := range m.allSecureds {
+							items[i] = securedItem{secured: s}
+						}
+						m.list.SetItems(items)
+						m.secureds = m.allSecureds
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
+						if m.parentTUI != nil {
+							return m.returnToParent(), nil
+						}
+						return m, tea.Quit
+					case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+						if len(m.secureds) == 0 {
+							return m, nil
+						}
+						i, ok := m.list.SelectedItem().(securedItem)
+						if ok {
+							if m.fieldsTUI == nil {
+								m.fieldsTUI = NewFieldsTUI(m.SecuredService, m.FieldsService)
+							}
+							m.fieldsTUI.SetSecured(i.secured)
+							m.fieldsTUI.SetParentTUI(m)
+							m.fieldsTUI.SetWindowSize(m.width, m.height)
+							return m.fieldsTUI, m.fieldsTUI.Init()
+						}
+					}
+					var cmd tea.Cmd
+					m.list, cmd = m.list.Update(msg)
+					return m, cmd
+				}
+			}
+
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q", "ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
+			case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
+				m.searchActive = true
+				m.searchFocused = true
+				m.searchInput.Focus()
+				return m, textinput.Blink
 			case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 				m.state = securedAddFormView
 				m.titleInput.Focus()
@@ -262,7 +405,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				_, err := m.SecuredService.AddSecured(title)
+				_, err := m.SecuredService.AddSecured(title, m.groupID)
 				if err != nil {
 					m.err = err
 					return m, nil
@@ -274,7 +417,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.titleInput.Blur()
 				return m, m.loadSecureds()
 			case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
@@ -302,7 +445,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedID = ""
 				return m, nil
 			case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
@@ -316,7 +459,7 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = nil
 				return m, nil
 			case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
-				if m.parentMenu != nil {
+				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
@@ -361,15 +504,50 @@ func (m SecuredTUI) View() string {
 
 	switch m.state {
 	case securedListView:
-		header := headerStyle.Render("Secured Items")
-		content := header + "\n" + m.list.View()
+		headerText := "Secured Items"
+		if m.groupName != "" {
+			headerText = fmt.Sprintf("Secured Items: %s", m.groupName)
+		}
+		header := headerStyle.Render(headerText)
+		content := header
+
+		if m.searchActive {
+			searchBoxStyle := lipgloss.NewStyle().
+				Width(listWidth).
+				Align(lipgloss.Center).
+				MarginTop(1)
+
+			countStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241")).
+				Width(listWidth).
+				Align(lipgloss.Center)
+
+			content += "\n" + searchBoxStyle.Render(m.searchInput.View())
+
+			totalCount := len(m.allSecureds)
+			currentCount := len(m.secureds)
+			if m.searchInput.Value() == "" {
+				currentCount = totalCount
+			} else {
+				currentCount = len(m.list.Items())
+			}
+			content += "\n" + countStyle.Render(fmt.Sprintf("%d of %d items", currentCount, totalCount))
+		}
+
+		content += "\n" + m.list.View()
 
 		if m.err != nil {
 			content += "\n" + errorStyle.Render(m.err.Error())
 		}
 
-		help := "a: add • d: delete • enter: view fields • esc: back"
-		if len(m.secureds) == 0 {
+		help := "a: add • d: delete • /: search • enter: view fields • esc: back"
+		if m.searchActive {
+			if m.searchFocused {
+				help = "tab: navigate list • esc: close search"
+			} else {
+				help = "tab: back to search • enter: select • esc: close search"
+			}
+		} else if len(m.secureds) == 0 {
 			help = "a: add new secured item • esc: back"
 		}
 

@@ -3,6 +3,7 @@ package adapter
 import (
 	"log"
 
+	"github.com/edlingao/psswrdMngr/internal/config"
 	"github.com/edlingao/psswrdMngr/internal/password/core"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -13,7 +14,7 @@ type PasswordDBService struct {
 }
 
 func NewPasswordDBService() *PasswordDBService {
-	db, err := sqlx.Connect("sqlite3", "./db/main.db")
+	db, err := sqlx.Connect("sqlite3", config.GetDBPath())
 	if err != nil {
 		log.Fatal("Error connecting to DB: ", err)
 	}
@@ -24,7 +25,7 @@ func NewPasswordDBService() *PasswordDBService {
 }
 
 func (pDB *PasswordDBService) Connect() error {
-	db, err := sqlx.Connect("sqlite3", "./db/main.db")
+	db, err := sqlx.Connect("sqlite3", config.GetDBPath())
 
 	if err != nil {
 		log.Fatal("Error connecting to DB: ", err)

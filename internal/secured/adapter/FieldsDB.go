@@ -4,6 +4,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/edlingao/psswrdMngr/internal/config"
 	"github.com/edlingao/psswrdMngr/internal/secured/core"
 	"github.com/jmoiron/sqlx"
 )
@@ -22,7 +23,7 @@ func NewFieldsDBService(db *sqlx.DB) *FieldsDBService {
 }
 
 func (fDB *FieldsDBService) connect() error {
-	db, err := sqlx.Connect("sqlite3", "./db/main.db")
+	db, err := sqlx.Connect("sqlite3", config.GetDBPath())
 
 	if err != nil {
 		return err

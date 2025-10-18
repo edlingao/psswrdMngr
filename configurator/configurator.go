@@ -2,6 +2,8 @@ package configurator
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	groupAdapters "github.com/edlingao/psswrdMngr/internal/group/adapter"
+	groupPorts "github.com/edlingao/psswrdMngr/internal/group/ports"
 	passwordAdapters "github.com/edlingao/psswrdMngr/internal/password/adapter"
 	passswordPorts "github.com/edlingao/psswrdMngr/internal/password/ports"
 	securedAdapters "github.com/edlingao/psswrdMngr/internal/secured/adapter"
@@ -11,6 +13,8 @@ import (
 type Configurator struct {
 	PasswordService passswordPorts.PasswordOperations
 	PasswordHex     passswordPorts.PasswordTUI
+	GroupService    groupPorts.GroupServiceOperations
+	GroupTUI        *groupAdapters.GroupTUI
 	SecuredService  securedPorts.SecuredServiceOperations
 	SecuredTUI      *securedAdapters.SecuredTUI
 	Menu            Menu
@@ -21,7 +25,7 @@ func NewConfig() *Configurator {
 }
 
 func (c *Configurator) Start() *Configurator {
-	c.Menu = NewMenu(c.PasswordHex, c.SecuredTUI)
+	c.Menu = NewMenu(c.PasswordHex, c.GroupTUI)
 	return c
 }
 
@@ -37,6 +41,14 @@ func (c *Configurator) AddPassword() *Configurator {
 	return c
 }
 
+func (c *Configurator) AddGroup() *Configurator {
+	groupDB := groupAdapters.NewGroupDB(nil)
+	groupService := groupAdapters.NewGroupService(groupDB)
+	c.GroupService = groupService
+	c.GroupTUI = groupAdapters.NewGroupTUI(groupService)
+	return c
+}
+
 func (c *Configurator) AddSecured() *Configurator {
 	securedDB := securedAdapters.NewSecuredDB(nil)
 	fieldsDB := securedAdapters.NewFieldsDBService(nil)
@@ -45,6 +57,7 @@ func (c *Configurator) AddSecured() *Configurator {
 	securedService := securedAdapters.NewSecureService(securedDB, fieldsService)
 	c.SecuredService = securedService
 	c.SecuredTUI = securedAdapters.NewSecuredTUI(securedService, fieldsService)
+	c.GroupTUI.SetSecuredTUI(c.SecuredTUI)
 	return c
 }
 

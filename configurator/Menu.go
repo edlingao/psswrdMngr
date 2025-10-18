@@ -30,7 +30,7 @@ type Menu struct {
 	help        help.Model
 	keys        keyMap
 	passwordTUI passswordPorts.PasswordTUI
-	securedTUI  tea.Model
+	groupTUI    tea.Model
 	width       int
 	height      int
 }
@@ -77,10 +77,10 @@ var DefaultKeymap = keyMap{
 
 func NewMenu(
 	passwordTUI passswordPorts.PasswordTUI,
-	securedTUI tea.Model,
+	groupTUI tea.Model,
 ) Menu {
 	items := []list.Item{
-		item{title: "Secured Items", desc: "View and manage secured notes and passwords"},
+		item{title: "Groups", desc: "View and manage groups of secured items"},
 		item{title: "Settings", desc: "Setup master password to encrypt your data"},
 	}
 
@@ -97,7 +97,7 @@ func NewMenu(
 		help:        help.New(),
 		keys:        DefaultKeymap,
 		passwordTUI: passwordTUI,
-		securedTUI:  securedTUI,
+		groupTUI:    groupTUI,
 		width:       defaultWidth,
 		height:      listHeight,
 	}
@@ -187,20 +187,20 @@ func (m Menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						setter.SetWindowSize(m.width, m.height)
 					}
 					return m.passwordTUI, nil
-				case "Secured Items":
-					if m.securedTUI != nil {
-						if setter, ok := m.securedTUI.(interface{ SetWindowSize(int, int) }); ok {
+				case "Groups":
+					if m.groupTUI != nil {
+						if setter, ok := m.groupTUI.(interface{ SetWindowSize(int, int) }); ok {
 							setter.SetWindowSize(m.width, m.height)
 						}
-						if setter, ok := m.securedTUI.(interface{ SetParentMenu(tea.Model) }); ok {
+						if setter, ok := m.groupTUI.(interface{ SetParentMenu(tea.Model) }); ok {
 							setter.SetParentMenu(m)
 						}
-						if initer, ok := m.securedTUI.(interface{ Init() tea.Cmd }); ok {
-							return m.securedTUI, initer.Init()
+						if initer, ok := m.groupTUI.(interface{ Init() tea.Cmd }); ok {
+							return m.groupTUI, initer.Init()
 						}
-						return m.securedTUI, nil
+						return m.groupTUI, nil
 					}
-					return m, tea.Printf("Secured Items not available")
+					return m, tea.Printf("Groups not available")
 				}
 			}
 		}
