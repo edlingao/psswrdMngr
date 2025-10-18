@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/edlingao/psswrdMngr/internal/group/core"
 	"github.com/edlingao/psswrdMngr/internal/group/ports"
+	"github.com/sahilm/fuzzy"
 )
 
 type groupViewState int
@@ -98,13 +99,17 @@ type GroupTUI struct {
 	GroupService  ports.GroupServiceOperations
 	list          list.Model
 	nameInput     textinput.Model
+	searchInput   textinput.Model
 	state         groupViewState
 	width         int
 	height        int
 	message       string
 	err           error
 	groups        []core.Group
+	allGroups     []core.Group
 	selectedGroup *core.Group
+	searchActive  bool
+	searchFocused bool
 	parentMenu    tea.Model
 	securedTUI    tea.Model
 }
@@ -124,10 +129,15 @@ func NewGroupTUI(
 	nameInput.Placeholder = "Enter group name"
 	nameInput.CharLimit = 256
 
+	searchInput := textinput.New()
+	searchInput.Placeholder = "Search groups..."
+	searchInput.CharLimit = 256
+
 	return &GroupTUI{
 		GroupService: groupService,
 		list:         l,
 		nameInput:    nameInput,
+		searchInput:  searchInput,
 		state:        groupListView,
 		width:        defaultWidth,
 		height:       listHeight,
@@ -155,6 +165,7 @@ func (m *GroupTUI) SetWindowSize(width, height int) {
 	m.list.SetSize(listWidth, listHeight)
 	m.list.SetDelegate(groupItemDelegate{width: listWidth})
 	m.nameInput.Width = listWidth - 4
+	m.searchInput.Width = listWidth - 4
 }
 
 func (m *GroupTUI) returnToParent() tea.Model {
@@ -202,6 +213,7 @@ func (m GroupTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.groups = msg.groups
+		m.allGroups = msg.groups
 		items := make([]list.Item, 0, len(msg.groups)+1)
 		items = append(items, groupItem{isUngrouped: true})
 		for _, g := range msg.groups {
@@ -224,17 +236,154 @@ func (m GroupTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(listWidth, listHeight)
 		m.list.SetDelegate(groupItemDelegate{width: listWidth})
 		m.nameInput.Width = listWidth - 4
+		m.searchInput.Width = listWidth - 4
 		return m, nil
 
 	case tea.KeyMsg:
 		switch m.state {
 		case groupListView:
+			if m.searchActive {
+				if m.searchFocused {
+					switch {
+					case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+						m.searchFocused = false
+						m.searchInput.Blur()
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+						m.searchActive = false
+						m.searchFocused = false
+						m.searchInput.Blur()
+						m.searchInput.SetValue("")
+						items := make([]list.Item, 0, len(m.allGroups)+1)
+						items = append(items, groupItem{isUngrouped: true})
+						for _, g := range m.allGroups {
+							group := g
+							items = append(items, groupItem{group: &group})
+						}
+						m.list.SetItems(items)
+						m.groups = m.allGroups
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
+						if m.parentMenu != nil {
+							return m.returnToParent(), nil
+						}
+						return m, tea.Quit
+					default:
+						var cmd tea.Cmd
+						m.searchInput, cmd = m.searchInput.Update(msg)
+
+					query := m.searchInput.Value()
+					if query == "" {
+						items := make([]list.Item, 0, len(m.allGroups)+1)
+						items = append(items, groupItem{isUngrouped: true})
+						for _, g := range m.allGroups {
+							group := g
+							items = append(items, groupItem{group: &group})
+						}
+						m.list.SetItems(items)
+						m.groups = m.allGroups
+					} else {
+						candidates := make([]string, 0, len(m.allGroups)+1)
+						candidates = append(candidates, "Ungrouped")
+						for _, g := range m.allGroups {
+							candidates = append(candidates, g.Name)
+						}
+
+						matches := fuzzy.Find(query, candidates)
+						items := make([]list.Item, 0, len(matches))
+						filtered := make([]core.Group, 0)
+
+						for _, match := range matches {
+							if match.Str == "Ungrouped" {
+								items = append(items, groupItem{isUngrouped: true})
+							} else {
+								for _, g := range m.allGroups {
+									if g.Name == match.Str {
+										group := g
+										items = append(items, groupItem{group: &group})
+										filtered = append(filtered, g)
+										break
+									}
+								}
+							}
+						}
+
+						m.list.SetItems(items)
+						m.groups = filtered
+					}
+
+					return m, cmd
+					}
+				} else {
+					switch {
+					case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+						m.searchFocused = true
+						m.searchInput.Focus()
+						return m, textinput.Blink
+					case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+						m.searchActive = false
+						m.searchFocused = false
+						m.searchInput.Blur()
+						m.searchInput.SetValue("")
+						items := make([]list.Item, 0, len(m.allGroups)+1)
+						items = append(items, groupItem{isUngrouped: true})
+						for _, g := range m.allGroups {
+							group := g
+							items = append(items, groupItem{group: &group})
+						}
+						m.list.SetItems(items)
+						m.groups = m.allGroups
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
+						if m.parentMenu != nil {
+							return m.returnToParent(), nil
+						}
+						return m, tea.Quit
+					case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+						i, ok := m.list.SelectedItem().(groupItem)
+						if ok && m.securedTUI != nil {
+							var groupID *string
+							var groupName string
+							if i.isUngrouped {
+								groupID = nil
+								groupName = "Ungrouped"
+							} else {
+								groupID = &i.group.ID
+								groupName = i.group.Name
+							}
+
+							if setter, ok := m.securedTUI.(interface{ SetGroup(groupID *string, groupName string) }); ok {
+								setter.SetGroup(groupID, groupName)
+							}
+							if setter, ok := m.securedTUI.(interface{ SetWindowSize(int, int) }); ok {
+								setter.SetWindowSize(m.width, m.height)
+							}
+							if setter, ok := m.securedTUI.(interface{ SetParentTUI(tea.Model) }); ok {
+								setter.SetParentTUI(m)
+							}
+							if initer, ok := m.securedTUI.(interface{ Init() tea.Cmd }); ok {
+								return m.securedTUI, initer.Init()
+							}
+							return m.securedTUI, nil
+						}
+					}
+					var cmd tea.Cmd
+					m.list, cmd = m.list.Update(msg)
+					return m, cmd
+				}
+			}
+
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q", "ctrl+c"))):
 				if m.parentMenu != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
+			case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
+				m.searchActive = true
+				m.searchFocused = true
+				m.searchInput.Focus()
+				return m, textinput.Blink
 			case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 				m.state = groupAddFormView
 				m.nameInput.Focus()
@@ -442,13 +591,45 @@ func (m GroupTUI) View() string {
 	switch m.state {
 	case groupListView:
 		header := headerStyle.Render("Groups")
-		content := header + "\n" + m.list.View()
+		content := header
+
+		if m.searchActive {
+			searchBoxStyle := lipgloss.NewStyle().
+				Width(listWidth).
+				Align(lipgloss.Center).
+				MarginTop(1)
+
+			countStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241")).
+				Width(listWidth).
+				Align(lipgloss.Center)
+
+			content += "\n" + searchBoxStyle.Render(m.searchInput.View())
+
+			totalCount := len(m.allGroups) + 1
+			currentCount := len(m.groups)
+			if m.searchInput.Value() == "" {
+				currentCount = totalCount
+			} else {
+				currentCount = len(m.list.Items())
+			}
+			content += "\n" + countStyle.Render(fmt.Sprintf("%d of %d groups", currentCount, totalCount))
+		}
+
+		content += "\n" + m.list.View()
 
 		if m.err != nil {
 			content += "\n" + errorStyle.Render(m.err.Error())
 		}
 
-		help := "a: add • r: rename • d: delete • enter: view items • esc: back"
+		help := "a: add • r: rename • d: delete • /: search • enter: view items • esc: back"
+		if m.searchActive {
+			if m.searchFocused {
+				help = "tab: navigate list • esc: close search"
+			} else {
+				help = "tab: back to search • enter: select • esc: close search"
+			}
+		}
 		content += "\n" + helpStyle.Render(help)
 		return boxStyle.Render(content)
 

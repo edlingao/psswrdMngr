@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/edlingao/psswrdMngr/internal/secured/core"
 	"github.com/edlingao/psswrdMngr/internal/secured/ports"
+	"github.com/sahilm/fuzzy"
 )
 
 type fieldViewState int
@@ -85,6 +86,7 @@ type FieldsTUI struct {
 	list           list.Model
 	nameInput      textinput.Model
 	valueInput     textinput.Model
+	searchInput    textinput.Model
 	state          fieldViewState
 	width          int
 	height         int
@@ -92,8 +94,11 @@ type FieldsTUI struct {
 	err            error
 	secured        core.Secured
 	fields         core.Fields
+	allFields      core.Fields
 	selectedField  core.Field
 	valueRevealed  bool
+	searchActive   bool
+	searchFocused  bool
 	parentTUI      tea.Model
 }
 
@@ -117,12 +122,17 @@ func NewFieldsTUI(
 	valueInput.Placeholder = "Field value"
 	valueInput.CharLimit = 1024
 
+	searchInput := textinput.New()
+	searchInput.Placeholder = "Search fields..."
+	searchInput.CharLimit = 256
+
 	return &FieldsTUI{
 		SecuredService: securedService,
 		FieldsService:  fieldsService,
 		list:           l,
 		nameInput:      nameInput,
 		valueInput:     valueInput,
+		searchInput:    searchInput,
 		state:          fieldListView,
 		width:          defaultWidth,
 		height:         listHeight,
@@ -151,6 +161,7 @@ func (m *FieldsTUI) SetWindowSize(width, height int) {
 	m.list.SetDelegate(fieldItemDelegate{width: listWidth})
 	m.nameInput.Width = listWidth - 4
 	m.valueInput.Width = listWidth - 4
+	m.searchInput.Width = listWidth - 4
 }
 
 func (m *FieldsTUI) returnToParent() tea.Model {
@@ -198,6 +209,7 @@ func (m FieldsTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.fields = msg.fields
+		m.allFields = msg.fields
 		items := make([]list.Item, len(msg.fields))
 		for i, f := range msg.fields {
 			items[i] = fieldItem{field: f}
@@ -219,17 +231,126 @@ func (m FieldsTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetDelegate(fieldItemDelegate{width: listWidth})
 		m.nameInput.Width = listWidth - 4
 		m.valueInput.Width = listWidth - 4
+		m.searchInput.Width = listWidth - 4
 		return m, nil
 
 	case tea.KeyMsg:
 		switch m.state {
 		case fieldListView:
+			if m.searchActive {
+				if m.searchFocused {
+					switch {
+					case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+						m.searchFocused = false
+						m.searchInput.Blur()
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+						m.searchActive = false
+						m.searchFocused = false
+						m.searchInput.Blur()
+						m.searchInput.SetValue("")
+						items := make([]list.Item, len(m.allFields))
+						for i, f := range m.allFields {
+							items[i] = fieldItem{field: f}
+						}
+						m.list.SetItems(items)
+						m.fields = m.allFields
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
+						if m.parentTUI != nil {
+							return m.returnToParent(), nil
+						}
+						return m, tea.Quit
+					default:
+						var cmd tea.Cmd
+						m.searchInput, cmd = m.searchInput.Update(msg)
+
+					query := m.searchInput.Value()
+					if query == "" {
+						items := make([]list.Item, len(m.allFields))
+						for i, f := range m.allFields {
+							items[i] = fieldItem{field: f}
+						}
+						m.list.SetItems(items)
+						m.fields = m.allFields
+					} else {
+						candidates := make([]string, len(m.allFields))
+						for i, f := range m.allFields {
+							candidates[i] = f.Name
+						}
+
+						matches := fuzzy.Find(query, candidates)
+						items := make([]list.Item, len(matches))
+						filtered := make(core.Fields, len(matches))
+
+						for i, match := range matches {
+							for _, f := range m.allFields {
+								if f.Name == match.Str {
+									items[i] = fieldItem{field: f}
+									filtered[i] = f
+									break
+								}
+							}
+						}
+
+						m.list.SetItems(items)
+						m.fields = filtered
+					}
+
+					return m, cmd
+					}
+				} else {
+					switch {
+					case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+						m.searchFocused = true
+						m.searchInput.Focus()
+						return m, textinput.Blink
+					case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+						m.searchActive = false
+						m.searchFocused = false
+						m.searchInput.Blur()
+						m.searchInput.SetValue("")
+						items := make([]list.Item, len(m.allFields))
+						for i, f := range m.allFields {
+							items[i] = fieldItem{field: f}
+						}
+						m.list.SetItems(items)
+						m.fields = m.allFields
+						return m, nil
+					case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+c"))):
+						if m.parentTUI != nil {
+							return m.returnToParent(), nil
+						}
+						return m, tea.Quit
+					case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+						if len(m.fields) == 0 {
+							return m, nil
+						}
+						i, ok := m.list.SelectedItem().(fieldItem)
+						if ok {
+							m.selectedField = i.field
+							m.valueRevealed = false
+							m.state = fieldDetailModalView
+							return m, nil
+						}
+					}
+					var cmd tea.Cmd
+					m.list, cmd = m.list.Update(msg)
+					return m, cmd
+				}
+			}
+
 			switch {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc", "q", "ctrl+c"))):
 				if m.parentTUI != nil {
 					return m.returnToParent(), nil
 				}
 				return m, tea.Quit
+			case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
+				m.searchActive = true
+				m.searchFocused = true
+				m.searchInput.Focus()
+				return m, textinput.Blink
 			case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 				m.state = fieldAddFormView
 				m.nameInput.Focus()
@@ -489,14 +610,45 @@ func (m FieldsTUI) View() string {
 	switch m.state {
 	case fieldListView:
 		header := headerStyle.Render(fmt.Sprintf("Fields: %s", m.secured.Title))
-		content := header + "\n" + m.list.View()
+		content := header
+
+		if m.searchActive {
+			searchBoxStyle := lipgloss.NewStyle().
+				Width(listWidth).
+				Align(lipgloss.Center).
+				MarginTop(1)
+
+			countStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241")).
+				Width(listWidth).
+				Align(lipgloss.Center)
+
+			content += "\n" + searchBoxStyle.Render(m.searchInput.View())
+
+			totalCount := len(m.allFields)
+			currentCount := len(m.fields)
+			if m.searchInput.Value() == "" {
+				currentCount = totalCount
+			} else {
+				currentCount = len(m.list.Items())
+			}
+			content += "\n" + countStyle.Render(fmt.Sprintf("%d of %d fields", currentCount, totalCount))
+		}
+
+		content += "\n" + m.list.View()
 
 		if m.err != nil {
 			content += "\n" + errorStyle.Render(m.err.Error())
 		}
 
-		help := "a: add • e: edit • d: delete • enter: view • esc: back"
-		if len(m.fields) == 0 {
+		help := "a: add • e: edit • d: delete • /: search • enter: view • esc: back"
+		if m.searchActive {
+			if m.searchFocused {
+				help = "tab: navigate list • esc: close search"
+			} else {
+				help = "tab: back to search • enter: select • esc: close search"
+			}
+		} else if len(m.fields) == 0 {
 			help = "a: add new field • esc: back"
 		}
 

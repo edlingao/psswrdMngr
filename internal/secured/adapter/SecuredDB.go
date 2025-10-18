@@ -4,6 +4,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/edlingao/psswrdMngr/internal/config"
 	"github.com/edlingao/psswrdMngr/internal/secured/core"
 	"github.com/jmoiron/sqlx"
 )
@@ -25,7 +26,7 @@ func NewSecuredDB(db *sqlx.DB) *SecuredDB {
 }
 
 func (sDB *SecuredDB) connect() error {
-	db, err := sqlx.Connect("sqlite3", "./db/main.db")
+	db, err := sqlx.Connect("sqlite3", config.GetDBPath())
 
 	if err != nil {
 		return err

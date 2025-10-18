@@ -4,6 +4,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/edlingao/psswrdMngr/internal/config"
 	"github.com/edlingao/psswrdMngr/internal/group/core"
 	"github.com/jmoiron/sqlx"
 )
@@ -25,7 +26,7 @@ func NewGroupDB(db *sqlx.DB) *GroupDB {
 }
 
 func (gDB *GroupDB) connect() error {
-	db, err := sqlx.Connect("sqlite3", "./db/main.db")
+	db, err := sqlx.Connect("sqlite3", config.GetDBPath())
 
 	if err != nil {
 		return err
