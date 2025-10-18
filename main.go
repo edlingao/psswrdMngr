@@ -1,7 +1,23 @@
 package main
 
-import "log"
+import (
+	"fmt"
+	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/edlingao/psswrdMngr/configurator"
+)
 
 func main() {
-	log.Println("Hello, World!")
+	config := configurator.NewConfig().
+		AddPassword().
+		AddSecured().
+		Start()
+
+	initialModel := config.GetInitialModel()
+
+	if _, err := tea.NewProgram(initialModel).Run(); err != nil {
+		fmt.Printf("Alas, there's been an error: %v", err)
+		os.Exit(1)
+	}
 }

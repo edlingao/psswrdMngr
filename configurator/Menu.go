@@ -1,0 +1,233 @@
+package configurator
+
+import (
+	"fmt"
+	"io"
+
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	passswordPorts "github.com/edlingao/psswrdMngr/internal/password/ports"
+)
+
+var (
+	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
+	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("39"))
+)
+
+type item struct {
+	title, desc string
+}
+
+func (i item) Title() string       { return i.title }
+func (i item) Description() string { return i.desc }
+func (i item) FilterValue() string { return i.title }
+
+type Menu struct {
+	list        list.Model
+	help        help.Model
+	keys        keyMap
+	passwordTUI passswordPorts.PasswordTUI
+	securedTUI  tea.Model
+	width       int
+	height      int
+}
+
+type keyMap struct {
+	Up    key.Binding
+	Down  key.Binding
+	Enter key.Binding
+	Exit  key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.Enter, k.Exit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down},    // first column
+		{k.Enter, k.Exit}, // second column
+	}
+}
+
+var DefaultKeymap = keyMap{
+	Up: key.NewBinding(
+		key.WithKeys("k", "up"),
+		key.WithHelp("↑/k", "move up"),
+	),
+
+	Down: key.NewBinding(
+		key.WithKeys("j", "down"),
+		key.WithHelp("↓/j", "move down"),
+	),
+
+	Enter: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "select"),
+	),
+
+	Exit: key.NewBinding(
+		key.WithKeys("esc", "q", "ctrl+c"),
+		key.WithHelp("esc/q/ctrl+c", "exit"),
+	),
+}
+
+func NewMenu(
+	passwordTUI passswordPorts.PasswordTUI,
+	securedTUI tea.Model,
+) Menu {
+	items := []list.Item{
+		item{title: "Secured Items", desc: "View and manage secured notes and passwords"},
+		item{title: "Settings", desc: "Setup master password to encrypt your data"},
+	}
+
+	const defaultWidth = 80
+	const listHeight = 14
+
+	l := list.New(items, itemDelegate{width: defaultWidth}, defaultWidth, listHeight)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowTitle(false)
+
+	menu := Menu{
+		list:        l,
+		help:        help.New(),
+		keys:        DefaultKeymap,
+		passwordTUI: passwordTUI,
+		securedTUI:  securedTUI,
+		width:       defaultWidth,
+		height:      listHeight,
+	}
+
+	if setter, ok := passwordTUI.(interface{ SetParentMenu(tea.Model) }); ok {
+		setter.SetParentMenu(menu)
+	}
+
+	return menu
+}
+
+type itemDelegate struct {
+	width int
+}
+
+func (d itemDelegate) Height() int                             { return 2 }
+func (d itemDelegate) Spacing() int                            { return 1 }
+func (d itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	i, ok := listItem.(item)
+	if !ok {
+		return
+	}
+
+	title := i.Title()
+	desc := i.Description()
+
+	if index == m.Index() {
+		titleStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("39")).
+			Width(d.width).
+			Align(lipgloss.Center)
+		descStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Width(d.width).
+			Align(lipgloss.Center)
+
+		title = titleStyle.Render(title)
+		desc = descStyle.Render(desc)
+	} else {
+		titleStyle := lipgloss.NewStyle().
+			Width(d.width).
+			Align(lipgloss.Center)
+		descStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			Width(d.width).
+			Align(lipgloss.Center)
+
+		title = titleStyle.Render(title)
+		desc = descStyle.Render(desc)
+	}
+
+	fmt.Fprintf(w, "%s\n%s", title, desc)
+}
+
+func (m Menu) Init() tea.Cmd {
+	return tea.ClearScreen
+}
+
+func (m Menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+		listWidth := msg.Width - 10
+		listHeight := 10
+		if msg.Height < 20 {
+			listHeight = msg.Height - 10
+		}
+
+		m.list.SetSize(listWidth, listHeight)
+		m.list.SetDelegate(itemDelegate{width: listWidth})
+		return m, nil
+
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, DefaultKeymap.Exit):
+			return m, tea.Quit
+		case key.Matches(msg, DefaultKeymap.Enter):
+			i, ok := m.list.SelectedItem().(item)
+			if ok {
+				switch i.Title() {
+				case "Settings":
+					if setter, ok := m.passwordTUI.(interface{ SetWindowSize(int, int) }); ok {
+						setter.SetWindowSize(m.width, m.height)
+					}
+					return m.passwordTUI, nil
+				case "Secured Items":
+					if m.securedTUI != nil {
+						if setter, ok := m.securedTUI.(interface{ SetWindowSize(int, int) }); ok {
+							setter.SetWindowSize(m.width, m.height)
+						}
+						if setter, ok := m.securedTUI.(interface{ SetParentMenu(tea.Model) }); ok {
+							setter.SetParentMenu(m)
+						}
+						if initer, ok := m.securedTUI.(interface{ Init() tea.Cmd }); ok {
+							return m.securedTUI, initer.Init()
+						}
+						return m.securedTUI, nil
+					}
+					return m, tea.Printf("Secured Items not available")
+				}
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m Menu) View() string {
+	listWidth := m.width - 10
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("39")).
+		Align(lipgloss.Center).
+		Width(listWidth).
+		MarginBottom(1)
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("39")).
+		Padding(1, 2)
+
+	header := headerStyle.Render("Welcome to your password manager")
+	content := header + "\n" + m.list.View()
+
+	return boxStyle.Render(content)
+}
