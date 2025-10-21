@@ -121,7 +121,7 @@ func (m LoginTUI) View() string {
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("241")).
 		Width(listWidth).
-		Align(lipgloss.Center).
+		Align(lipgloss.Left).
 		MarginTop(2)
 
 	errorStyle := lipgloss.NewStyle().

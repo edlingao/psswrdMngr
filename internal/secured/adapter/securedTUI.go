@@ -148,9 +148,13 @@ func (m *SecuredTUI) SetWindowSize(width, height int) {
 	m.height = height
 
 	listWidth := width - 10
-	listHeight := 10
-	if height < 20 {
-		listHeight = height - 10
+	overhead := 10
+	if m.searchActive {
+		overhead += 4
+	}
+	listHeight := height - overhead
+	if listHeight < 5 {
+		listHeight = 5
 	}
 
 	m.list.SetSize(listWidth, listHeight)
@@ -225,9 +229,13 @@ func (m SecuredTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 		listWidth := msg.Width - 10
-		listHeight := 10
-		if msg.Height < 20 {
-			listHeight = msg.Height - 10
+		overhead := 10
+		if m.searchActive {
+			overhead += 4
+		}
+		listHeight := msg.Height - overhead
+		if listHeight < 5 {
+			listHeight = 5
 		}
 
 		m.list.SetSize(listWidth, listHeight)
@@ -493,7 +501,7 @@ func (m SecuredTUI) View() string {
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("241")).
 		Width(listWidth).
-		Align(lipgloss.Center).
+		Align(lipgloss.Left).
 		MarginTop(2)
 
 	errorStyle := lipgloss.NewStyle().
