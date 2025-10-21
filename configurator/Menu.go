@@ -165,9 +165,10 @@ func (m Menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 		listWidth := msg.Width - 10
-		listHeight := 10
-		if msg.Height < 20 {
-			listHeight = msg.Height - 10
+		overhead := 8
+		listHeight := msg.Height - overhead
+		if listHeight < 5 {
+			listHeight = 5
 		}
 
 		m.list.SetSize(listWidth, listHeight)
